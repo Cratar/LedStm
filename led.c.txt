@@ -1,0 +1,103 @@
+1. Подготовка массива цифр из числа
+void numberToDigits(uint32_t number, uint8_t digits[8]) {
+    // Заполняем массив справа налево
+    for (int i = 7; i >= 0; i--) {
+        digits[i] = number % 10;
+        number /= 10;
+    }
+}
+
+
+Пример: 1234 → digits = {0,0,0,0,1,2,3,4}
+
+2. Таблица сегментов для цифр
+
+(в TM1637 цифры кодируются байтами для сегментов)
+
+const uint8_t SEG_TAB[10] = {
+  0x3f, // 0
+  0x06, // 1
+  0x5b, // 2
+  0x4f, // 3
+  0x66, // 4
+  0x6d, // 5
+  0x7d, // 6
+  0x07, // 7
+  0x7f, // 8
+  0x6f  // 9
+};
+
+3. Функции для TM1637 (бит-бэнг)
+void TM1637_start(GPIO_TypeDef* GPIOx_CLK, uint16_t PIN_CLK,
+                  GPIO_TypeDef* GPIOx_DIO, uint16_t PIN_DIO) {
+    HAL_GPIO_WritePin(GPIOx_DIO, PIN_DIO, GPIO_PIN_SET);
+    HAL_GPIO_WritePin(GPIOx_CLK, PIN_CLK, GPIO_PIN_SET);
+    HAL_Delay(1);
+    HAL_GPIO_WritePin(GPIOx_DIO, PIN_DIO, GPIO_PIN_RESET);
+}
+
+void TM1637_stop(GPIO_TypeDef* GPIOx_CLK, uint16_t PIN_CLK,
+                 GPIO_TypeDef* GPIOx_DIO, uint16_t PIN_DIO) {
+    HAL_GPIO_WritePin(GPIOx_CLK, PIN_CLK, GPIO_PIN_RESET);
+    HAL_Delay(1);
+    HAL_GPIO_WritePin(GPIOx_DIO, PIN_DIO, GPIO_PIN_RESET);
+    HAL_Delay(1);
+    HAL_GPIO_WritePin(GPIOx_CLK, PIN_CLK, GPIO_PIN_SET);
+    HAL_Delay(1);
+    HAL_GPIO_WritePin(GPIOx_DIO, PIN_DIO, GPIO_PIN_SET);
+}
+
+void TM1637_writeByte(GPIO_TypeDef* GPIOx_CLK, uint16_t PIN_CLK,
+                      GPIO_TypeDef* GPIOx_DIO, uint16_t PIN_DIO,
+                      uint8_t b) {
+    for (int i=0; i<8; i++) {
+        HAL_GPIO_WritePin(GPIOx_CLK, PIN_CLK, GPIO_PIN_RESET);
+        HAL_Delay(1);
+        HAL_GPIO_WritePin(GPIOx_DIO, PIN_DIO, (b & 0x01) ? GPIO_PIN_SET : GPIO_PIN_RESET);
+        b >>= 1;
+        HAL_Delay(1);
+        HAL_GPIO_WritePin(GPIOx_CLK, PIN_CLK, GPIO_PIN_SET);
+        HAL_Delay(1);
+    }
+    // ACK — можно игнорировать
+    HAL_GPIO_WritePin(GPIOx_CLK, PIN_CLK, GPIO_PIN_RESET);
+    HAL_Delay(1);
+    HAL_GPIO_WritePin(GPIOx_CLK, PIN_CLK, GPIO_PIN_SET);
+    HAL_Delay(1);
+}
+
+4. Отправка 4 цифр на дисплей
+void TM1637_display4(GPIO_TypeDef* GPIOx_CLK, uint16_t PIN_CLK,
+                     GPIO_TypeDef* GPIOx_DIO, uint16_t PIN_DIO,
+                     uint8_t digits[4]) {
+    TM1637_start(GPIOx_CLK, PIN_CLK, GPIOx_DIO, PIN_DIO);
+    TM1637_writeByte(GPIOx_CLK, PIN_CLK, GPIOx_DIO, PIN_DIO, 0x40); // auto-increment mode
+    TM1637_stop(GPIOx_CLK, PIN_CLK, GPIOx_DIO, PIN_DIO);
+
+    TM1637_start(GPIOx_CLK, PIN_CLK, GPIOx_DIO, PIN_DIO);
+    TM1637_writeByte(GPIOx_CLK, PIN_CLK, GPIOx_DIO, PIN_DIO, 0xC0); // адрес 0
+    for (int i=0; i<4; i++) {
+        TM1637_writeByte(GPIOx_CLK, PIN_CLK, GPIOx_DIO, PIN_DIO, SEG_TAB[digits[i]]);
+    }
+    TM1637_stop(GPIOx_CLK, PIN_CLK, GPIOx_DIO, PIN_DIO);
+
+    // яркость (0x8X)
+    TM1637_start(GPIOx_CLK, PIN_CLK, GPIOx_DIO, PIN_DIO);
+    TM1637_writeByte(GPIOx_CLK, PIN_CLK, GPIOx_DIO, PIN_DIO, 0x8f); // яркость макс
+    TM1637_stop(GPIOx_CLK, PIN_CLK, GPIOx_DIO, PIN_DIO);
+}
+
+5. Основная функция (вывод числа на оба дисплея)
+void showNumber(uint32_t number) {
+    uint8_t allDigits[8];
+    numberToDigits(number, allDigits);
+
+    uint8_t d1[4], d2[4];
+    for (int i=0; i<4; i++) {
+        d1[i] = allDigits[i];     // первые 4
+        d2[i] = allDigits[i+4];   // вторые 4
+    }
+
+    TM1637_display4(GPIOB, GPIO_PIN_0, GPIOB, GPIO_PIN_1, d1); // пример: CLK=B0, DIO=B1
+    TM1637_display4(GPIOB, GPIO_PIN_2, GPIOB, GPIO_PIN_10, d2); // пример: CLK=B2, DIO=B10
+}
